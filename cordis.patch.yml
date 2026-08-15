@@ -1,0 +1,5 @@
+- insert:
+    - id: goodmemory
+      name: dsh-goodmemory
+      config:
+        mode: managed
