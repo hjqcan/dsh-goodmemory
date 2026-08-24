@@ -15,8 +15,8 @@ completed DSH turn -> GoodMemory remember -> later DSH pre-step
 
 | Package/runtime | Supported version |
 | --- | --- |
-| `@deepseek-ai/dsh` | `0.1.0-rc.6` |
-| `goodmemory` | `0.7.4` |
+| `@deepseek-ai/dsh` | `0.1.0-rc.8` |
+| `goodmemory` | `0.7.5` |
 | Node.js | `^22.19.0` or `>=24.0.0` |
 | Bun, managed mode only | `>=1.3.14` |
 
@@ -27,7 +27,7 @@ DSH is still an RC. This package deliberately pins its DSH peers; a new RC is un
 Install from npm:
 
 ```sh
-dsh plugin --profile web add dsh-goodmemory@0.1.0
+dsh plugin --profile web add dsh-goodmemory@0.1.1
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -37,7 +37,7 @@ For a local checkout:
 ```sh
 pnpm install
 pnpm pack
-dsh plugin --profile web add ./dsh-goodmemory-0.1.0.tgz
+dsh plugin --profile web add ./dsh-goodmemory-0.1.1.tgz
 ```
 
 Use `--profile headless` instead of `web` for the headless composition. The bundle inserts one `goodmemory` row; later profile, home, and CLI patch layers can replace its complete config.

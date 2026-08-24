@@ -15,8 +15,8 @@
 
 | 包/运行时 | 支持版本 |
 | --- | --- |
-| `@deepseek-ai/dsh` | `0.1.0-rc.6` |
-| `goodmemory` | `0.7.4` |
+| `@deepseek-ai/dsh` | `0.1.0-rc.8` |
+| `goodmemory` | `0.7.5` |
 | Node.js | `^22.19.0` 或 `>=24.0.0` |
 | Bun，仅 managed 模式 | `>=1.3.14` |
 
@@ -27,7 +27,7 @@ DSH 仍处于 RC。本包故意精确锁定 DSH peer；新的 RC 必须重新通
 从 npm 安装：
 
 ```sh
-dsh plugin --profile web add dsh-goodmemory@0.1.0
+dsh plugin --profile web add dsh-goodmemory@0.1.1
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -37,7 +37,7 @@ dsh --profile web
 ```sh
 pnpm install
 pnpm pack
-dsh plugin --profile web add ./dsh-goodmemory-0.1.0.tgz
+dsh plugin --profile web add ./dsh-goodmemory-0.1.1.tgz
 ```
 
 无头模式将 `web` 换成 `headless`。bundle 只插入一个 `goodmemory` row；后续 profile、home 或命令行 patch 可以完整覆盖它的 config。
