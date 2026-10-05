@@ -1,0 +1,4 @@
+# This exact release is verified against the GoodMemory release artifact.
+# Keep the release-age policy in place for every other dependency.
+minimumReleaseAgeExclude:
+  - goodmemory@0.8.3
