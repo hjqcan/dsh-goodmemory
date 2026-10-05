@@ -26,6 +26,60 @@ interface RememberInput {
   signal?: AbortSignal
 }
 
+type ExtractionStrategy = 'auto' | 'rules-only' | 'llm-assisted'
+
+export interface RememberReceipt {
+  accepted: number
+  rejected: number
+  outcome: 'committed' | 'no_admissible_candidate' | 'failed' | 'unknown'
+  rejectionReasons: string[]
+  warningCount: number
+  requestedExtractionStrategy?: ExtractionStrategy
+  resolvedExtractionStrategy?: ExtractionStrategy
+}
+
+const REJECTION_REASONS = new Set([
+  'assistant_policy_blocked', 'below_threshold', 'explicit_opt_out',
+  'invalid_after_redaction', 'invalid_payload', 'noise', 'note_too_large',
+  'policy_blocked', 'storage_unsafe', 'unattributed_personal_claim', 'unsupported_kind',
+])
+
+function extractionStrategy(value: unknown): ExtractionStrategy | undefined {
+  return value === 'auto' || value === 'rules-only' || value === 'llm-assisted' ? value : undefined
+}
+
+function rememberReceipt(value: unknown): RememberReceipt {
+  if (
+    !isRecord(value)
+    || typeof value.accepted !== 'number'
+    || !Number.isSafeInteger(value.accepted)
+    || value.accepted < 0
+    || typeof value.rejected !== 'number'
+    || !Number.isSafeInteger(value.rejected)
+    || value.rejected < 0
+    || !Array.isArray(value.events)
+    || !value.events.every(isRecord)
+  ) {
+    throw new Error('dsh-goodmemory: GoodMemory remember result is malformed')
+  }
+  const metadata = isRecord(value.metadata) ? value.metadata : {}
+  const requested = extractionStrategy(metadata.requestedExtractionStrategy)
+  const resolved = extractionStrategy(metadata.resolvedExtractionStrategy)
+  return {
+    accepted: value.accepted,
+    rejected: value.rejected,
+    outcome: value.outcome === 'committed' || value.outcome === 'no_admissible_candidate' || value.outcome === 'failed'
+      ? value.outcome : 'unknown',
+    // Only known codes enter logs; never forward free-form bridge data or content.
+    rejectionReasons: [...new Set(value.events
+      .filter(event => event.outcome === 'rejected')
+      .map(event => typeof event.reason === 'string' && REJECTION_REASONS.has(event.reason) ? event.reason : 'other'))],
+    warningCount: Array.isArray(value.warnings) ? value.warnings.length : 0,
+    ...(requested === undefined ? {} : { requestedExtractionStrategy: requested }),
+    ...(resolved === undefined ? {} : { resolvedExtractionStrategy: resolved }),
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -102,7 +156,7 @@ export class GoodMemoryHttpClient {
     }
   }
 
-  async remember(input: RememberInput): Promise<void> {
+  async remember(input: RememberInput): Promise<RememberReceipt> {
     const body = await this.operation('remember', {
       idempotencyKey: input.idempotencyKey,
       messages: input.messages,
@@ -113,6 +167,7 @@ export class GoodMemoryHttpClient {
     if (body.ok !== true || body.operation !== 'remember' || body.mode !== 'sync') {
       throw new Error('dsh-goodmemory: GoodMemory remember response is malformed')
     }
+    return rememberReceipt(body.result)
   }
 
   private async operation(

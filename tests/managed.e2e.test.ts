@@ -1,7 +1,10 @@
 import { access, chmod, mkdir, mkdtemp, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -17,6 +20,30 @@ const bunAvailable = spawnSync(
   { stdio: 'ignore' },
 ).status === 0
 const bunIt = bunAvailable ? it : it.skip
+const execFileAsync = promisify(execFile)
+
+interface WorkerResult {
+  pid: number
+  completedTurns: number
+  requests: string[][]
+  loggedRecall: string[]
+  diagnostics: Array<Record<string, unknown>>
+}
+
+async function runWorker(home: string, sessionId: string, cwd: string, messages: string[]): Promise<WorkerResult> {
+  // Keep this deterministic even on a workstation with assisted extraction configured.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    !key.startsWith('GOODMEMORY_') || key === 'GOODMEMORY_BUN_BINARY'
+  ))
+  const { stdout } = await execFileAsync(process.execPath, [
+    '--experimental-transform-types',
+    fileURLToPath(new URL('./helpers/managed-worker.ts', import.meta.url)),
+    JSON.stringify({ cwd, databasePath: join(home, 'memory.sqlite'), messages, sessionId }),
+  ], { env: { ...env, DSH_HOME: join(home, 'dsh-home') }, timeout: 45_000 })
+  const result = stdout.split('\n').find(line => line.startsWith('DSH_RESTART_RESULT='))
+  if (result === undefined) throw new Error('Managed worker exited without its verification result')
+  return JSON.parse(result.slice('DSH_RESTART_RESULT='.length)) as WorkerResult
+}
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -42,6 +69,57 @@ function childProcessIds(pid: number): number[] {
 }
 
 describe('managed GoodMemory sidecar', () => {
+  const decisionBody = 'When SQLite reports SQLITE_BUSY_SNAPSHOT, roll back the transaction, begin again and recompute from a fresh read before writing.'
+
+  bunIt.each([
+    { name: 'Project decision: is durable', statement: `Project decision: ${decisionBody}`, accepted: true },
+    { name: 'We decided is durable', statement: 'We decided that when SQLite reports SQLITE_BUSY_SNAPSHOT, we roll back the transaction, begin again and recompute from a fresh read before writing.', accepted: true },
+    { name: 'Project policy: is durable', statement: `Project policy: ${decisionBody}`, accepted: true },
+    { name: 'an unresolved decision remains source-only', statement: 'Project decision: When SQLite reports SQLITE_BUSY_SNAPSHOT, what should we do?', accepted: false },
+  ])('verifies extraction, full process restart and scope: $name', async ({ statement, accepted }) => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-goodmemory-decision-'))
+    const cwd = join(home, 'project-a')
+    const questions = ['Which package manager do I prefer?', 'What is the project decision for SQLITE_BUSY_SNAPSHOT?']
+    const first = await runWorker(home, 'decision-a', cwd, [
+      'I prefer pnpm for package management.', statement,
+    ])
+    expect(first.completedTurns).toBe(2)
+    expect(first.requests[0]).toEqual([])
+    const receipts = first.diagnostics.filter(entry => entry.event === 'writeback_result')
+    expect(receipts).toHaveLength(2)
+    expect(receipts[1]).toMatchObject({
+      accepted: accepted ? 1 : 0,
+      outcome: accepted ? 'committed' : 'no_admissible_candidate',
+      resolvedExtractionStrategy: 'rules-only',
+    })
+
+    const database = new DatabaseSync(join(home, 'memory.sqlite'), { readOnly: true })
+    try {
+      const rows = database.prepare("SELECT collection FROM documents WHERE instr(json, 'SQLITE_BUSY_SNAPSHOT') > 0").all()
+      expect(rows.filter(row => row.collection === 'source_messages_v1')).toHaveLength(1)
+      expect(rows.some(row => row.collection === 'facts')).toBe(accepted)
+      if (!accepted) expect(rows.every(row => row.collection === 'source_messages_v1')).toBe(true)
+    } finally {
+      database.close()
+    }
+
+    const restarted = await runWorker(home, 'decision-b', cwd, questions)
+    const isolated = await runWorker(home, 'decision-c', join(home, 'project-b'), questions)
+    expect(new Set([first.pid, restarted.pid, isolated.pid]).size).toBe(3)
+    expect(restarted.completedTurns).toBe(2)
+    expect(restarted.requests[0]?.join('\n')).toContain('pnpm')
+    expect(restarted.loggedRecall.join('\n')).toContain('pnpm')
+    expect(restarted.requests[1]?.join('\n').includes('SQLITE_BUSY_SNAPSHOT')).toBe(accepted)
+    expect(restarted.loggedRecall.join('\n').includes('SQLITE_BUSY_SNAPSHOT')).toBe(accepted)
+    expect(isolated.completedTurns).toBe(2)
+    expect(isolated.requests).toEqual([[], []])
+    expect(isolated.loggedRecall).toEqual([])
+    for (const worker of [first, restarted, isolated]) {
+      expect(processExists(worker.pid)).toBe(false)
+      expect(worker.diagnostics.filter(entry => entry.event === 'writeback_failed' || entry.event === 'recall_failed')).toEqual([])
+    }
+  }, 120_000)
+
   bunIt('enforces owner-only permissions on the default managed storage directory', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-goodmemory-permissions-'))
     const storageDirectory = join(home, 'goodmemory')

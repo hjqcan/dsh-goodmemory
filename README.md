@@ -16,7 +16,7 @@ completed DSH turn -> GoodMemory remember -> later DSH pre-step
 | Package/runtime | Supported version |
 | --- | --- |
 | `@deepseek-ai/dsh` | `0.1.0-rc.8` |
-| `goodmemory` | `0.7.5` |
+| `goodmemory` | `0.8.3` |
 | Node.js | `^22.19.0` or `>=24.0.0` |
 | Bun, managed mode only | `>=1.3.14` |
 
@@ -27,7 +27,7 @@ DSH is still an RC. This package deliberately pins its DSH peers; a new RC is un
 Install from npm:
 
 ```sh
-dsh plugin --profile web add dsh-goodmemory@0.1.1
+dsh plugin --profile web add dsh-goodmemory@0.1.2
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -37,7 +37,7 @@ For a local checkout:
 ```sh
 pnpm install
 pnpm pack
-dsh plugin --profile web add ./dsh-goodmemory-0.1.1.tgz
+dsh plugin --profile web add ./dsh-goodmemory-0.1.2.tgz
 ```
 
 Use `--profile headless` instead of `web` for the headless composition. The bundle inserts one `goodmemory` row; later profile, home, and CLI patch layers can replace its complete config.
@@ -103,6 +103,29 @@ type Config = {
 - Runtime recall/writeback failures are logged with phase, session, and turn identity, then the DSH turn continues. Startup failures remain fatal.
 - The next recall for the same durable scope waits for pending writeback, including a new session created immediately after the preceding turn.
 
+### Project decisions and writeback receipts
+
+With GoodMemory 0.8.3, a direct user statement such as the following is accepted
+without annotations and recalled after a process restart in the same scope:
+
+```text
+Project decision: When SQLite reports SQLITE_BUSY_SNAPSHOT, roll back the transaction, begin again and recompute from a fresh read before writing.
+```
+
+`We decided that ...` and substantive `Project policy: ...` declarations also
+work. Questions and undecided placeholders are not confirmed decisions.
+GoodMemory 0.8.2 retained the example above as source text but did not create a
+durable fact. Re-send previously source-only decisions after upgrading; the
+upgrade does not re-extract old transcripts automatically.
+
+Every completed writeback logs a `writeback_result` receipt with the session,
+turn, duration, accepted/rejected counts, outcome, extraction strategy, and
+known rejection reason codes. `no_admissible_candidate` means no durable
+candidate was admitted; HTTP success alone does not mean the text became a
+memory. These diagnostics omit conversation text, raw bridge errors, and
+credentials. Recall counts are available through debug-level `recall_result`
+logs. Extraction warnings or a failed outcome produce warning-level receipts.
+
 ## Scope
 
 Defaults are deliberately DSH-isolated:
@@ -134,4 +157,4 @@ pnpm test:e2e   # real Bun + GoodMemory SQLite restart proof
 pnpm pack
 ```
 
-The deterministic integration suite uses a scripted DSH model adapter. It verifies logged recall context, completed-only writeback, tool/reasoning exclusion, scope isolation, write-after-read ordering, runtime degradation, and strict startup validation. No benchmark uplift claim is made.
+The deterministic integration suite uses a scripted DSH model adapter. It verifies logged recall context, completed-only writeback, tool/reasoning exclusion, scope isolation, write-after-read ordering, runtime degradation, and strict startup validation. The decision regression runs write, restart, and different-directory phases in separate Node processes with a real managed Bun/SQLite bridge, inspecting both the model request and session log. CI also runs that regression on Windows. No benchmark uplift or answer-quality claim is made.

@@ -146,6 +146,38 @@ describe('DSH lifecycle integration', () => {
     }
   })
 
+  it('logs a source-only writeback receipt while allowing the completed turn to finish', async () => {
+    const bridge = await createTestBridge()
+    bridge.state.rememberResult = {
+      accepted: 0, rejected: 1, outcome: 'no_admissible_candidate',
+      events: [{ outcome: 'rejected', reason: 'below_threshold', content: 'private bridge detail' }],
+      metadata: { requestedExtractionStrategy: 'auto', resolvedExtractionStrategy: 'rules-only' },
+    }
+    const ctx = await createHarness(new ScriptedAdapter([textResponse('Acknowledged.')]))
+    const info = vi.spyOn(ctx.logger, 'info')
+    try {
+      await installExternal(ctx, bridge)
+      const agent = createAgent(ctx, 'session-receipt')
+      send(agent, 'Private conversation text.')
+      await agent.whenIdle()
+      await ctx.sessions.flush(agent.session)
+      expect(agent.session.events.findLast(event => event.type === 'turn/end')).toMatchObject({
+        data: { reason: { kind: 'completed' } },
+      })
+      const receipt = info.mock.calls.map(call => String(call[0])).find(line => line.includes('writeback_result'))
+      expect(JSON.parse(receipt ?? '')).toMatchObject({
+        event: 'writeback_result', sessionId: 'session-receipt', turn: 1,
+        accepted: 0, rejected: 1, outcome: 'no_admissible_candidate',
+        rejectionReasons: ['below_threshold'], resolvedExtractionStrategy: 'rules-only',
+      })
+      expect(receipt).not.toContain('private bridge detail')
+      expect(receipt).not.toContain('Private conversation text')
+    } finally {
+      await ctx.fiber.dispose()
+      await bridge.close()
+    }
+  })
+
   it('does not write max-token turns', async () => {
     const bridge = await createTestBridge()
     const adapter = new ScriptedAdapter([textResponse('truncated', 'max-tokens')])

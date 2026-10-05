@@ -16,7 +16,7 @@
 | 包/运行时 | 支持版本 |
 | --- | --- |
 | `@deepseek-ai/dsh` | `0.1.0-rc.8` |
-| `goodmemory` | `0.7.5` |
+| `goodmemory` | `0.8.3` |
 | Node.js | `^22.19.0` 或 `>=24.0.0` |
 | Bun，仅 managed 模式 | `>=1.3.14` |
 
@@ -27,7 +27,7 @@ DSH 仍处于 RC。本包故意精确锁定 DSH peer；新的 RC 必须重新通
 从 npm 安装：
 
 ```sh
-dsh plugin --profile web add dsh-goodmemory@0.1.1
+dsh plugin --profile web add dsh-goodmemory@0.1.2
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -37,7 +37,7 @@ dsh --profile web
 ```sh
 pnpm install
 pnpm pack
-dsh plugin --profile web add ./dsh-goodmemory-0.1.1.tgz
+dsh plugin --profile web add ./dsh-goodmemory-0.1.2.tgz
 ```
 
 无头模式将 `web` 换成 `headless`。bundle 只插入一个 `goodmemory` row；后续 profile、home 或命令行 patch 可以完整覆盖它的 config。
@@ -102,6 +102,20 @@ type Config = {
 - 写回使用 GoodMemory 正常的提取与策略边界；插件不发送 annotations，也不强制任何文本成为长期记忆。
 - 运行期召回/写回失败会记录阶段、session 与 turn 后继续 DSH 对话；启动错误仍然是致命错误。
 - 同一 durable scope 的下一次召回会等待在途写回，包括上一个 turn 完成后立即创建的新 session。
+
+### 项目决策与写回回执
+
+GoodMemory 0.8.3 支持直接用户声明，无需 annotations。以下原句会形成长期事实，并在同一作用域的进程重启后召回：
+
+```text
+Project decision: When SQLite reports SQLITE_BUSY_SNAPSHOT, roll back the transaction, begin again and recompute from a fresh read before writing.
+```
+
+`We decided that ...` 和有明确内容的 `Project policy: ...` 也支持；问句和待定占位语句不属于已确认决策。GoodMemory 0.8.2 对上述原句只保留来源文本，没有生成长期事实。升级不会自动重新提取旧对话；需要重新发送此前只保留原文的决策。
+
+每次完成写回都会记录 `writeback_result`，包含 session、turn、耗时、接受/拒绝数量、结果、提取策略及已知拒绝原因码。`no_admissible_candidate` 表示没有候选被接纳为长期记忆；HTTP 请求成功并不等于形成记忆。诊断日志不包含对话正文、原始 bridge 错误或凭据。debug 级别的 `recall_result` 可查看召回数量；提取警告或失败结果使用 warning 级别。
+
+决策回归测试使用独立 Node 进程执行写入、重启及不同目录的作用域对照，连接真实 Bun/SQLite bridge，同时检查模型请求和 session 日志。CI 也在 Windows 上运行这组测试；脚本模型测试不代表回答质量或编码收益。
 
 ## Scope
 

@@ -128,12 +128,21 @@ export async function apply(ctx: Context, input: Config = {}): Promise<void> {
     if (signal.aborted) return decision
 
     try {
+      const startedAt = Date.now()
       const recalled = await backend.client.recall({
         maxTokens: config.maxRecallTokens,
         query: query.text,
         scope,
         signal,
       })
+      ctx.logger.debug(JSON.stringify({
+        component: 'dsh-goodmemory',
+        durationMs: Date.now() - startedAt,
+        event: 'recall_result',
+        itemCount: recalled?.itemCount ?? 0,
+        sessionId: agent.session.id,
+        turn,
+      }))
       if (recalled === undefined || signal.aborted) return decision
       return {
         kind: 'enter',
@@ -157,11 +166,24 @@ export async function apply(ctx: Context, input: Config = {}): Promise<void> {
     const scope = scopeFor(resolveScope, session)
     writes.enqueue(
       durableScopeKey(scope),
-      () => backend.client.remember({
-        idempotencyKey: `dsh:${session.id}:turn:${event.data.turn}`,
-        messages: projection.messages,
-        scope,
-      }),
+      async () => {
+        const startedAt = Date.now()
+        const receipt = await backend.client.remember({
+          idempotencyKey: `dsh:${session.id}:turn:${event.data.turn}`,
+          messages: projection.messages,
+          scope,
+        })
+        const log = JSON.stringify({
+          component: 'dsh-goodmemory',
+          durationMs: Date.now() - startedAt,
+          event: 'writeback_result',
+          sessionId: session.id,
+          turn: event.data.turn,
+          ...receipt,
+        })
+        if (receipt.outcome === 'failed' || receipt.warningCount > 0) ctx.logger.warn(log)
+        else ctx.logger.info(log)
+      },
       error => warning(ctx, 'writeback_failed', error, session.id, event.data.turn),
     )
   })

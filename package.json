@@ -1,6 +1,6 @@
 {
   "name": "dsh-goodmemory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Automatic cross-session GoodMemory recall and writeback for DeepSeek Harness",
   "homepage": "https://github.com/hjqcan/dsh-goodmemory#readme",
   "license": "MIT",
@@ -57,7 +57,7 @@
     "@deepseek-ai/dsh-anonymous-user-id": "0.1.0-rc.8",
     "@deepseek-ai/dsh-home-paths": "0.1.0-rc.8",
     "@deepseek-ai/schemastery": "3.18.1",
-    "goodmemory": "0.7.5"
+    "goodmemory": "0.8.3"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.1",

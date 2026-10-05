@@ -8,6 +8,7 @@ interface BridgeState {
   rememberBodies: Record<string, unknown>[]
   remembered: boolean
   rememberDelayMs: number
+  rememberResult: Record<string, unknown>
 }
 
 export interface TestBridge {
@@ -41,6 +42,7 @@ export async function createTestBridge(options: {
     rememberBodies: [],
     remembered: false,
     rememberDelayMs: options.rememberDelayMs ?? 0,
+    rememberResult: { accepted: 1, events: [], rejected: 0, outcome: 'committed' },
   }
   const server = createServer(async (request, response) => {
     if (request.url === '/healthz') {
@@ -93,7 +95,7 @@ export async function createTestBridge(options: {
         mode: 'sync',
         ok: true,
         operation: 'remember',
-        result: { accepted: 1, events: [], rejected: 0 },
+        result: state.rememberResult,
       })
       return
     }

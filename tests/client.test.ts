@@ -122,7 +122,10 @@ describe('GoodMemoryHttpClient', () => {
       mode: 'sync',
       ok: true,
       operation: 'remember',
-      result: { accepted: 1, rejected: 0, events: [] },
+      result: {
+        accepted: 1, rejected: 0, events: [], outcome: 'committed',
+        metadata: { requestedExtractionStrategy: 'auto', resolvedExtractionStrategy: 'rules-only' },
+      },
     }))
     const client = new GoodMemoryHttpClient({
       baseUrl: 'http://memory.test', fetch, timeoutMs: 100, token: 'secret-token',
@@ -132,7 +135,15 @@ describe('GoodMemoryHttpClient', () => {
       { content: 'I will.', id: 'assistant-1', observedAt: '2026-08-15T00:00:01.000Z', role: 'assistant' },
     ]
 
-    await client.remember({ idempotencyKey: 'turn-1', messages, scope })
+    await expect(client.remember({ idempotencyKey: 'turn-1', messages, scope })).resolves.toEqual({
+      accepted: 1,
+      rejected: 0,
+      outcome: 'committed',
+      rejectionReasons: [],
+      warningCount: 0,
+      requestedExtractionStrategy: 'auto',
+      resolvedExtractionStrategy: 'rules-only',
+    })
 
     const [, init] = fetch.mock.calls[0] ?? []
     const headers = new Headers(init?.headers)
@@ -141,6 +152,46 @@ describe('GoodMemoryHttpClient', () => {
     expect(body).toEqual({ idempotencyKey: 'turn-1', messages, mode: 'sync', scope })
     expect(body).not.toHaveProperty('annotations')
     expect(body).not.toHaveProperty('extractionStrategy')
+  })
+
+  it('reports no durable candidate without exposing free-form bridge data', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json({
+      contractVersion: 'phase-39.http-memory.v1', mode: 'sync', ok: true, operation: 'remember',
+      result: {
+        accepted: 0, rejected: 2, outcome: 'no_admissible_candidate',
+        events: [
+          { outcome: 'rejected', reason: 'noise', content: 'private source content' },
+          { outcome: 'rejected', reason: 'private rejection detail' },
+        ],
+        warnings: ['private provider error'],
+        metadata: { requestedExtractionStrategy: 'auto', resolvedExtractionStrategy: 'rules-only' },
+      },
+    }))
+    const client = new GoodMemoryHttpClient({
+      baseUrl: 'http://memory.test', fetch, timeoutMs: 100, token: 'secret-token',
+    })
+    const result = await client.remember({ idempotencyKey: 'turn-1', messages: [], scope })
+    expect(result).toMatchObject({
+      accepted: 0, rejected: 2, outcome: 'no_admissible_candidate',
+      rejectionReasons: ['noise', 'other'], warningCount: 1,
+      resolvedExtractionStrategy: 'rules-only',
+    })
+    expect(JSON.stringify(result)).not.toContain('private')
+  })
+
+  it.each([
+    undefined,
+    { accepted: -1, rejected: 0, events: [] },
+    { accepted: 0, rejected: 0.5, events: [] },
+    { accepted: 0, rejected: 0, events: [null] },
+  ])('rejects a malformed remember result: %j', async (result) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json({
+      contractVersion: 'phase-39.http-memory.v1', mode: 'sync', ok: true, operation: 'remember', result,
+    }))
+    const client = new GoodMemoryHttpClient({
+      baseUrl: 'http://memory.test', fetch, timeoutMs: 100, token: 'secret-token',
+    })
+    await expect(client.remember({ idempotencyKey: 'turn-1', messages: [], scope })).rejects.toThrow(/remember result is malformed/)
   })
 
   it('fails closed on contract mismatch without exposing the token', async () => {
